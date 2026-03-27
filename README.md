@@ -48,9 +48,9 @@ You can install Postman via this website: https://www.postman.com/downloads/
     (You might want to use `cargo check` if you only need to verify your work without running the app.)
 
 ## Mandatory Checklists (Publisher)
--   [ ] Clone https://gitlab.com/ichlaffterlalu/bambangshop to a new repository.
+-   [x] Clone https://gitlab.com/ichlaffterlalu/bambangshop to a new repository.
 -   **STAGE 1: Implement models and repositories**
-    -   [ ] Commit: `Create Subscriber model struct.`
+    -   [x] Commit: `Create Subscriber model struct.`
     -   [ ] Commit: `Create Notification model struct.`
     -   [ ] Commit: `Create Subscriber database and Subscriber repository struct skeleton.`
     -   [ ] Commit: `Implement add function in Subscriber repository.`
