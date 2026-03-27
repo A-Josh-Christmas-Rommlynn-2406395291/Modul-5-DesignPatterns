@@ -51,7 +51,7 @@ You can install Postman via this website: https://www.postman.com/downloads/
 -   [x] Clone https://gitlab.com/ichlaffterlalu/bambangshop to a new repository.
 -   **STAGE 1: Implement models and repositories**
     -   [x] Commit: `Create Subscriber model struct.`
-    -   [ ] Commit: `Create Notification model struct.`
+    -   [x] Commit: `Create Notification model struct.`
     -   [ ] Commit: `Create Subscriber database and Subscriber repository struct skeleton.`
     -   [ ] Commit: `Implement add function in Subscriber repository.`
     -   [ ] Commit: `Implement list_all function in Subscriber repository.`
