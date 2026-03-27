@@ -77,6 +77,47 @@ This is the place for you to write reflections:
 ### Mandatory (Publisher) Reflections
 
 #### Reflection Publisher-1
+**1. In the Observer pattern diagram explained by the Head First Design Pattern book, Subscriber is defined as an interface. Explain based on your understanding of Observer design patterns, do we still need an interface (or `trait` in Rust) in this BambangShop case, or a single Model `struct` is enough?**
+
+First, I explain first question, which is: do we need a trait (interface) for Subscriber?
+
+1. If your "subscriber" list has multiple independent behaviors. Use a trait:
+- For example: `trait Subscriber { fn update(&self, ...); }`
+- You can use polymorphism like this: (`Vec<Box<dyn Subscriber>>`)
+- or you can easily to add new kinds of subscribers later (email, push, logs)
+
+2. But if only one concrete observer type, which is a single model `struct` exists and won't grow (or rarely change/grow).
+A single model `struct` may be enough because it is:
+- simpler
+- no dynamic dispatch
+- fewer abstractions
+- good for small scope / lower complexity
+**However, I must beware this: future change can make a plain struct harder to extend cleanly.**
+
+**2. `id` in `Program` and `url` in `Subscriber` is intended to be unique. Explain based on your understanding, is using `Vec` (list) sufficient or using `DashMap` (map/dictionary) like we currently use is necessary for this case?**
+
+The answer is `DashMap` is necessary and the right choice because:
+
+1. **Performance**: HTTP notification endpoints will frequently need to lookup subscribers by `url` or programs by `id`. O(1) hash map operations scale much better than O(n) vector searches.
+
+2. **Uniqueness Enforcement**: HashMap keys inherently prevent duplicates, aligning with the "intended to be unique" requirement without additional validation code.
+
+3. **Concurrency Safety**: Rocket's async nature means multiple threads could access subscriber/program data simultaneously. DashMap provides lock-free concurrent access, preventing race conditions that Vec would be vulnerable to.
+
+4. **Future-Proofing**: As the system grows (more subscribers/programs), the performance difference becomes critical.
+
+**3. When programming using Rust, we are enforced by rigorous compiler constraints to make a thread-safe program. In the case of the List of Subscribers (`SUBSCRIBERS`) static variable, we used the `DashMap` external library for *thread safe* `HashMap`. Explain based on your understanding of design patterns, do we still need `DashMap` or we can implement Singleton pattern instead?**
+
+Based on the code in `subscriber.rs`, the `SUBSCRIBERS` static variable is a `DashMap<String, DashMap<String, Subscriber>>` initialized with `lazy_static`!. This provides a thread-safe, concurrent hash map for storing subscribers grouped by product type.
+
+The Singleton pattern ensures that only one instance of a class or struct exists throughout the program's lifetime. However, it does not inherently address thread safety for data access in a concurrent environment. In this Rust project, which uses the Rocket web framework (an async, multi-threaded runtime), multiple threads may simultaneously read from or write to `SUBSCRIBERS` (e.g., during subscription/unsubscription or notification operations).
+
+Why `DashMap` is necessary: `DashMap` is a lock-free, thread-safe hash map that allows safe concurrent access without manual synchronization (e.g., no need for `Mutex` or `RwLock`). Rust's borrow checker and ownership rules enforce thread safety at compile time, and `DashMap1` aligns with this by providing atomic operations. Replacing it with a standard HashMap (even in a Singleton) would not compile due to potential data races in multi-threaded contexts.
+
+Singleton vs. `DashMap`: The Singleton pattern could be implemented using `once_cell::sync::Lazy` or similar for lazy initialization of a single instance. However, the data structure inside the Singleton still needs to be thread-safe. A Singleton wrapping a non-thread-safe HashMap would fail Rust's compiler checks. Thus, Singleton alone does not eliminate the need for DashMap; it merely ensures one global instance, while DashMap handles the concurrency.
+
+In summary, DashMap is required for thread safety, and the Singleton pattern is already partially achieved via `lazy_static`!. Attempting a pure Singleton without a thread-safe map would violate Rust's constraints (memory safety, ownership, and concurrency to prevent data races at compile time through its ownership and borrowing system via mutiple threads simultaneously read/write to the same map).
+
 
 #### Reflection Publisher-2
 
