@@ -69,7 +69,7 @@ You can install Postman via this website: https://www.postman.com/downloads/
     -   [x] Commit: `Implement notify function in Notification service to notify each Subscriber.`
     -   [x] Commit: `Implement publish function in Program service and Program controller.`
     -   [x] Commit: `Edit Product service methods to call notify after create/delete.`
-    -   [ ] Write answers of your learning module's "Reflection Publisher-3" questions in this README.
+    -   [x] Write answers of your learning module's "Reflection Publisher-3" questions in this README.
 
 ## Your Reflections
 This is the place for you to write reflections:
@@ -122,7 +122,7 @@ In summary, DashMap is required for thread safety, and the Singleton pattern is 
 #### Reflection Publisher-2
 **1. In the Model-View Controller (MVC) compound pattern, there is no “Service” and “Repository”. Model in MVC covers both data storage and business logic. Explain based on your understanding of design principles, why we need to separate “Service” and “Repository” from a Model?**
 
-Separating Service and Repository from the Model is essential for building scalable, maintainable, and testable software. Here's why:
+According to me, separating Service and Repository from the Model is essential for building scalable, maintainable, and testable software. Here's why:
 
 **1. Separation of Concerns (SoC)**
    - **Model**: Represents data structure and validation logic only (what a product is)
@@ -289,3 +289,223 @@ I explained first why Postman is useful for this project.
 
 
 #### Reflection Publisher-3
+
+**1. Observer Pattern has two variations: Push model (publisher pushes data to subscribers) and Pull model (subscribers pull data from publisher). In this tutorial case, which variation of Observer Pattern that we use?**
+
+In this BambangShop tutorial case, we use the **Push model** of the Observer Pattern.
+
+Evidence from the implementation:
+- In `ProductService`, when a product is created or deleted, the service actively calls `notify_subscribers()` which sends notifications to all interested subscribers
+- In `NotificationService::notify()`, the publisher iterates through all subscribers and pushes notifications by making HTTP POST requests directly to each subscriber's endpoint
+- The notification is triggered by product operations (create/delete), not by subscribers requesting updates
+- Subscribers are passive—they receive HTTP POST requests and don't initiate polling or pulling
+
+The flow is:
+```
+Product Created → ProductService → NotificationService::notify() → Iterates subscribers → HTTP POST to each subscriber's URL
+```
+
+This is characteristic of the Push model: **the publisher (BambangShop) actively sends data to all subscribed clients**.
+
+**2. What are the advantages and disadvantages of using the other variation of Observer Pattern for this tutorial case? (if you answer question number 1 with Push, then imagine if we used Pull)**
+
+If we switched to a **Pull model**, subscribers would periodically retrieve updates from the publisher instead of receiving pushed notifications. Here's how that would look and its implications:
+
+**Advantages of Pull Model:**
+
+1. **Loose Coupling**: Subscribers don't need to register their HTTP endpoints. The publisher doesn't need a list of subscriber URLs.
+   - Subscribers can be dynamically added/removed without notifying the publisher
+   - Publisher doesn't care about subscriber availability
+
+2. **Subscriber Autonomy**: Each subscriber decides when to fetch and how often
+   - A subscriber can prioritize which products to check based on its own schedule
+   - Subscribers control their own polling frequency based on needs
+
+3. **Reduced Publisher Load Spikes**: The publisher doesn't need to send notifications to many subscribers simultaneously
+   - No "thundering herd" problem during large product updates
+   - Smoother, more distributed load across time
+
+4. **Subscriber Resilience**: If a subscriber is temporarily offline, it still gets updates when it comes back online
+   - Pull model: subscriber just fetches missed updates
+   - Push model: subscriber misses notifications while offline
+
+5. **Simpler Error Handling for Publisher**: Publisher doesn't need to retry failed deliveries or manage subscriber endpoints
+   - No need to track which subscribers failed to receive notifications
+   - Publisher doesn't need to validate or maintain subscriber URLs
+
+**Disadvantages of Pull Model:**
+
+1. **Latency & Staleness**: Updates are not real-time; there's always a delay
+   - If a subscriber polls every 5 minutes, they could be 5 minutes behind
+   - For a real-time sales/promotion system, this is unacceptable
+   - "Your product was just deleted, but subscriber doesn't know for 5 minutes"
+
+2. **Wasted Network Bandwidth**: Subscribers continuously poll even when there are no updates
+   - 100 subscribers polling every 10 seconds = 600 requests per minute
+   - Most polls return "no new updates," wasting bandwidth and server resources
+   - In contrast, Push sends only when there's actual news
+
+3. **Higher Publisher Load**: Constant polling creates sustained high load
+   - Must maintain an endpoint that checks for updates by product type for each subscriber
+   - Queries the database repeatedly over time instead of once on an actual change
+   - Horizontal scaling becomes harder
+
+4. **Complex Subscriber Logic**: Subscribers need to manage polling state
+   - Must track last-seen update timestamp to know what's new
+   - Must implement retry logic if a poll fails
+   - Must implement duplicate detection (what if update was fetched twice?)
+
+5. **Difficult to Guarantee Delivery**: No hard guarantee all subscribers receive an update
+   - A subscriber might be offline/broken and never pull the update
+   - Need mechanisms to mark old updates as "must be fetched"
+
+6. **Subscriber Registration Still Needed**: Paradoxically, you still need a way for subscribers to register their interests
+   - Subscribers must somehow notify the publisher: "I'm interested in product type X"
+   - You haven't eliminated the registration; you've just separated notification from subscription
+
+7. **Resource Inefficiency**: Especially problematic at scale
+   - In BambangShop with 1000 subscribers polling every 5 seconds = 200 requests/second just checking for updates
+   - Push model with 10 products/minute updates = 10,000 notifications/minute = ~167 requests/second, but only when necessary
+
+**Pull Model Implementation in BambangShop would look like:**
+```rust
+// Instead of: /notification/subscriber (subscribe)
+// New endpoint: /notification/updates?product_type=food&since=2024-01-01T10:00:00Z
+
+// Subscribers poll this endpoint repeatedly:
+GET /api/v1/notification/updates?product_type=food&since=2024-01-01T10:00:00Z
+// Response: [Product { id, event_type, timestamp }]
+```
+
+**Verdict for BambangShop**: The **Push model is clearly superior** for this use case because:
+- Products are created/deleted infrequently (low update frequency)
+- Subscribers need near-real-time notification (notifications are about commerce events)
+- The number of subscribers is manageable (likely hundreds, not millions)
+- The tutorial emphasizes immediate notification, not eventual consistency
+
+The Pull model would make sense for scenarios like:
+- System monitoring (check every minute if any alerts exist)
+- News/content feeds (subscribers don't need real-time updates)
+- Low-frequency, high-latency-tolerant systems
+
+**3. Explain what will happen to the program if we decide to not use multi-threading in the notification process.**
+
+If we removed multi-threading from the notification process and made it synchronous, the application would suffer severe performance and responsiveness issues. Here's what would happen:
+
+**Scenario: User creates a new Product with 100 registered subscribers**
+
+**With Multi-threading (Current Implementation):**
+```
+User clicks "Create Product"
+  → Controller receives request
+  → Service creates product in repository (fast, < 1ms)
+  → Service spawns thread to notify subscribers
+  → Controller immediately returns 200 OK to user (< 10ms)
+  → In background: 100 HTTP POST requests sent to subscribers (takes ~5-30 seconds)
+  → User sees "Product created" immediately and continues browsing
+```
+
+**Without Multi-threading (Synchronous Blocking):**
+```
+User clicks "Create Product" → Controller receives request → Service creates product in repository (< 1ms) 
+  → Service synchronously notifies each subscriber:
+    ├─ Subscriber 1: HTTP POST request (2 seconds)
+    ├─ Subscriber 2: HTTP POST request (2 seconds)
+    ├─ Subscriber 3: HTTP POST request (2 seconds)
+    ├─ ... (repeat 100 times)
+    └─ Subscriber 100: HTTP POST request (2 seconds)
+  → Total: ~200 seconds (3+ minutes!) → Only THEN does controller return 200 OK to user → User stares at loading screen for 3+ minutes
+```
+
+**Concrete Problems That Occur:**
+
+1. **Blocking Request Threads**: 
+   - Rocket runs on async threads (Tokio runtime)
+   - Each HTTP request uses one async task
+   - If that task blocks on network I/O (HTTP POST to subscribers), the thread can't process other requests
+   - With 10 concurrent product creations × 100 subscribers each, you need 1000+ threads
+   - The Tokio runtime would be starved
+
+2. **Timeout Failures**:
+   - HTTP requests have timeouts (typically 30 seconds)
+   - If a subscriber's server is slow or unresponsive, the entire product creation hangs
+   - One slow subscriber delays all 100 remaining subscribers
+   - Request timeout might trigger before finishing all notifications
+
+3. **Resource Exhaustion**:
+   ```
+   10 users create products simultaneously
+   × 100 subscribers per product
+   = 1000 concurrent HTTP operations
+   ```
+   - System runs out of file descriptors/network sockets
+   - New HTTP connections fail: "Too many open files"
+   - Server becomes unresponsive
+
+4. **Poor User Experience**:
+   - User creates a product and waits 3+ minutes for response
+   - User creates 10 products and waits 30 minutes total
+   - Browser/client times out before notification completes
+   - Users think the server is broken
+
+5. **Cascade Failures**:
+   - If one subscriber is offline or extremely slow, it delays everyone
+   - One bad subscriber can make the entire system appear frozen
+   - No way to skip a slow subscriber and continue
+
+6. **No Parallelism**:
+   - If notifying 100 subscribers takes ~2 seconds each:
+     - Multi-threaded: ~10-30 seconds total (parallel to all)
+     - Single-threaded: ~200 seconds total (sequential)
+   - A 10-20× performance penalty
+
+7. **Rocket's Async Model Breakdown**:
+   - Rocket is designed for async/non-blocking operations
+   - Forcing synchronous blocking violates the async paradigm
+   - The event loop (Tokio) can't handle blocking operations efficiently
+   - It's like trying to run a car in reverse on the highway—technically possible but very bad design
+
+**Real-World Example**:
+```rust
+// WITHOUT multi-threading (WRONG):
+#[post("/products", format = "json", data = "<form>")]
+async fn create_product(form: Json<NewProductRequest>) -> Json<Product> {
+    let product = ProductService::create(&form);
+    
+    // These HTTP requests block the async task!
+    for subscriber in get_all_subscribers() {
+        let response = blocking_http_post(&subscriber.url, &notification)?;
+        // Each line waits 2-5 seconds
+        // Total request duration: 200+ seconds
+    }
+    
+    Json(product)  // User finally gets response after 3+ minutes
+}
+
+// WITH multi-threading (CORRECT):
+#[post("/products", format = "json", data = "<form>")]
+async fn create_product(form: Json<NewProductRequest>) -> Json<Product> {
+    let product = ProductService::create(&form);
+    
+    // Spawn async task to notify in background
+    tokio::spawn(async move {
+        NotificationService::notify_all_subscribers(product_id).await;
+        // Happens in background while user already has response
+    });
+    
+    Json(product)  // User gets response immediately (< 100ms)
+}
+```
+
+**Solution in Current Code**:
+The current implementation correctly uses async/threading because:
+- `tokio::spawn()` spawns independent async tasks for notifications
+- Each subscriber notification doesn't block the HTTP response
+- Multiple subscribers are notified in parallel
+- The main request returns immediately
+
+**Analogy**:
+- **Multi-threaded (correct)**: Like a restaurant where the chef starts cooking your food and you sit at the table while it prepares. You don't have to watch each step; you relax and eventually get your meal.
+- **Synchronous (wrong)**: Like a drive-thru where the worker makes your entire order one item at a time while you wait in the car. If they're making 100 cars' orders first, you wait hours.
+
+**Conclusion**: Without multi-threading, the notification process would make the application completely unusable for any real-world scenario with multiple subscribers. The response times would increase from milliseconds to minutes, causing user frustration and potential timeouts. This demonstrates why async/multi-threaded notification is not just a performance optimization—it's an architectural necessity for responsive web applications.
